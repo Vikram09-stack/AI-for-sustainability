@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { Award, Download, TrendingDown, ArrowRight, RefreshCw, Leaf, Plus, Save, X } from 'lucide-react';
-import { simulateCarbon, getLatestCarbonReport, logCarbonData } from '../../services/api';
+import { simulateCarbon, getLatestCarbonReport, logCarbonData, getCarbonSuggestions } from '../../services/api';
 
 const CarbonPage = () => {
     // Simulator/Calculator State
@@ -14,6 +14,10 @@ const CarbonPage = () => {
     // Real Data State
     const [realData, setRealData] = useState(null);
     const [loading, setLoading] = useState(true);
+
+    // AI Suggestions State
+    const [suggestions, setSuggestions] = useState([]);
+    const [aiLoading, setAiLoading] = useState(false);
 
     // Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -60,6 +64,39 @@ const CarbonPage = () => {
         };
         fetchSimulation();
     }, [transportMode, dietType, energySource]);
+
+    // Fetch AI Suggestions
+    const fetchSuggestions = async () => {
+        setAiLoading(true);
+        // Use real data if available, otherwise simulated
+        const sourceData = realData || {
+            totalCarbonFootprint: simulatedResults.total_footprint,
+            sustainabilityScore: simulatedResults.score,
+            breakdown: {
+                mobility: simulatedResults.breakdown.find(i => i.name === 'Mobility')?.value || 0,
+                energy: simulatedResults.breakdown.find(i => i.name === 'Energy')?.value || 0,
+                other: simulatedResults.breakdown.find(i => i.name === 'Diet')?.value || 0
+            }
+        };
+
+        const result = await getCarbonSuggestions({
+            totalCarbonFootprint: sourceData.totalCarbonFootprint,
+            sustainabilityScore: sourceData.sustainabilityScore,
+            breakdown: sourceData.breakdown
+        });
+
+        if (result) {
+            setSuggestions(result);
+        }
+        setAiLoading(false);
+    };
+
+    // Initial fetch of suggestions if real data exists
+    useEffect(() => {
+        if (realData) {
+            fetchSuggestions();
+        }
+    }, [realData]);
 
     // Handle Log Data Submit
     const handleLogSubmit = async (e) => {
@@ -403,28 +440,40 @@ const CarbonPage = () => {
 
                         {/* Recommendations */}
                         <div className="bg-white/70 backdrop-blur-md p-6 rounded-xl border border-white/40 shadow-xl">
-                            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                                <Award className="w-5 h-5 text-amber-500" /> Improvement Plan
-                            </h3>
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                    <Award className="w-5 h-5 text-amber-500" /> Improvement Plan
+                                </h3>
+                                <button
+                                    onClick={fetchSuggestions}
+                                    disabled={aiLoading}
+                                    className="text-sm font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 disabled:opacity-50"
+                                >
+                                    {aiLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                                    {aiLoading ? "Analyzing..." : "Refresh Insights"}
+                                </button>
+                            </div>
+
                             <div className="space-y-4">
-                                <Recommendation
-                                    priority="High"
-                                    title="Switch to EV Commute"
-                                    desc="Save up to 1.5 tons of CO₂ annually by switching from your petrol car."
-                                    color="text-red-600 bg-red-100"
-                                />
-                                <Recommendation
-                                    priority="Medium"
-                                    title="Install Smart Thermostats"
-                                    desc="Reduce home energy waste by 15% with automated climate control."
-                                    color="text-orange-600 bg-orange-100"
-                                />
-                                <Recommendation
-                                    priority="Low"
-                                    title="Meat-Free Mondays"
-                                    desc="Small diet changes can reduce your footprint by 200kg/year."
-                                    color="text-emerald-600 bg-emerald-100"
-                                />
+                                {suggestions.length > 0 ? (
+                                    suggestions.map((suggestion, index) => (
+                                        <Recommendation
+                                            key={index}
+                                            priority={suggestion.impact}
+                                            title={suggestion.title}
+                                            desc={suggestion.description}
+                                            color={
+                                                suggestion.impact === 'High' ? 'text-red-600 bg-red-100' :
+                                                    suggestion.impact === 'Medium' ? 'text-orange-600 bg-orange-100' :
+                                                        'text-emerald-600 bg-emerald-100'
+                                            }
+                                        />
+                                    ))
+                                ) : (
+                                    <div className="text-center p-8 text-slate-500">
+                                        <p>Click refresh to get AI-powered suggestions!</p>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>

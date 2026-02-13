@@ -97,4 +97,41 @@ router.post('/analyze', async (req, res) => {
     });
 });
 
+// POST /api/energy/predict - Predict Energy Consumption using XGBoost
+router.post('/predict', async (req, res) => {
+    const data = { ...req.body, type: 'energy_predict' };
+    const scriptPath = path.join(process.cwd(), 'ai_model', 'predict.py');
+
+    const pythonProcess = spawn('python3', [scriptPath]);
+
+    let result = '';
+    let errorOutput = '';
+
+    pythonProcess.stdin.write(JSON.stringify(data));
+    pythonProcess.stdin.end();
+
+    pythonProcess.stdout.on('data', (data) => {
+        result += data.toString();
+    });
+
+    pythonProcess.stderr.on('data', (data) => {
+        console.error("Python stderr:", data.toString());
+        errorOutput += data.toString();
+    });
+
+    pythonProcess.on('close', (code) => {
+        if (code !== 0) {
+            console.error("Prediction failed. Stderr:", errorOutput);
+            return res.status(500).json({ message: 'Prediction failed', error: errorOutput });
+        }
+        try {
+            const parsed = JSON.parse(result);
+            res.json(parsed);
+        } catch (e) {
+            console.error("JSON parse error:", e);
+            res.status(500).json({ message: 'Invalid AI output', raw: result });
+        }
+    });
+});
+
 export default router;

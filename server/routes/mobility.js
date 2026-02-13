@@ -2,6 +2,7 @@ import express from 'express';
 import MobilityLog from '../models/MobilityLog.js';
 import { spawn } from 'child_process';
 import path from 'path';
+import { OpenAI } from 'openai';
 
 const router = express.Router();
 
@@ -65,6 +66,60 @@ router.post('/', async (req, res) => {
         res.status(201).json(savedLog);
     } catch (error) {
         res.status(400).json({ message: error.message });
+    }
+});
+
+// POST /api/mobility/suggestions - Get AI Travel Insights
+router.post('/suggestions', async (req, res) => {
+    try {
+        const { start, end, comparisons, bestOption } = req.body;
+
+        const client = new OpenAI({
+            apiKey: process.env.ASI_API_KEY,
+            baseURL: "https://inference.asicloud.cudos.org/v1"
+        });
+
+        const prompt = `
+        The user is planning a trip from "${start}" to "${end}".
+        
+        Available options:
+        ${comparisons.map(c => `- ${c.label}: ${c.time}, ${c.cost}, ${c.co2}`).join('\n')}
+
+        Best green option identified: ${bestOption ? bestOption.label : 'N/A'}.
+
+        Provide 3 short, specific, and actionable travel insights or fun facts related to sustainable travel for this specific route. 
+        Focus on why the greenest option is better or provide a tip for the journey.
+        
+        Format the response as a JSON array of objects with 'title', 'description', and 'type' (Tip/Fact/Insight) keys.
+        Do not include markdown formatting or code blocks, just raw JSON.
+        `;
+
+        const response = await client.chat.completions.create({
+            model: "asi1-mini",
+            messages: [
+                { role: "user", content: prompt }
+            ]
+        });
+
+        const suggestionsText = response.choices[0].message.content;
+        let suggestions = [];
+        try {
+            const cleanJson = suggestionsText.replace(/```json/g, '').replace(/```/g, '').trim();
+            suggestions = JSON.parse(cleanJson);
+        } catch (e) {
+            console.error("Failed to parse AI mobility suggestions:", e);
+            suggestions = [
+                { title: "Eco - Tip", description: "Carpooling can reduce your individual carbon footprint significantly.", type: "Tip" },
+                { title: "Did you know?", description: "Metros are one of the most energy-efficient ways to travel in cities.", type: "Fact" },
+                { title: "Health Benefit", description: "Walking to the bus stop adds to your daily steps!", type: "Insight" }
+            ];
+        }
+
+        res.json(suggestions);
+
+    } catch (error) {
+        console.error("AI Mobility Suggestion Error:", error);
+        res.status(500).json({ message: "Failed to generate insights" });
     }
 });
 

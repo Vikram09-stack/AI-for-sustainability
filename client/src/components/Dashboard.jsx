@@ -76,7 +76,7 @@ const Dashboard = () => {
 
     if (loading && data.length === 0) return (
         <div className="flex justify-center items-center py-20 min-h-screen bg-slate-900 text-white">
-            <div className="animate-pulse text-emerald-400 font-semibold text-lg">Loading EcoEnergyAI Dashboard...</div>
+            <div className="animate-pulse text-emerald-400 font-semibold text-lg">Loading UrbanMind Dashboard...</div>
         </div>
     );
 

@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { Navigation, Clock, CreditCard, Leaf, ArrowRight, Car, Bus, Train } from 'lucide-react';
-import { calculateMobility } from '../../services/api';
+import { calculateMobility, getMobilitySuggestions } from '../../services/api';
 
 // Helper component to recenter map
 const RecenterMap = ({ points }) => {
@@ -23,6 +23,10 @@ const MobilityPage = () => {
     const [transportType, setTransportType] = useState('car');
     const [loading, setLoading] = useState(false);
     const [bestOption, setBestOption] = useState(null);
+
+    // AI Suggestions State
+    const [suggestions, setSuggestions] = useState([]);
+    const [aiLoading, setAiLoading] = useState(false);
 
     // Route state
     const [routePoints, setRoutePoints] = useState([
@@ -73,8 +77,8 @@ const MobilityPage = () => {
                     };
                 } else {
                     console.error(`Failed to get result for ${item.mode}`);
+                    return { ...item, time: 'N/A', cost: 'N/A', co2: 'N/A' };
                 }
-                return item;
             }));
 
             setComparisons(updatedComparisons);
@@ -99,11 +103,40 @@ const MobilityPage = () => {
             });
             setBestOption(best);
 
+            // Auto-fetch suggestions if calculation was successful
+            if (best) {
+                // We need to pass the most up-to-date data, so we can't use state immediately here for parameters
+                // But we can call the async function with current local variables
+                fetchSuggestions(start, end, updatedComparisons, best);
+            }
+
         } catch (err) {
             console.error("Error in handleCalculate:", err);
             alert("An error occurred while calculating route data. Check console for details.");
         } finally {
             setLoading(false);
+        }
+    };
+
+    const fetchSuggestions = async (currentStart = start, currentEnd = end, currentComparisons = comparisons, currentBest = bestOption) => {
+        if (!currentBest) return;
+
+        setAiLoading(true);
+        try {
+            const result = await getMobilitySuggestions({
+                start: currentStart,
+                end: currentEnd,
+                comparisons: currentComparisons,
+                bestOption: currentBest
+            });
+
+            if (result) {
+                setSuggestions(result);
+            }
+        } catch (e) {
+            console.error("Failed to fetch mobility suggestions", e);
+        } finally {
+            setAiLoading(false);
         }
     };
 
@@ -169,9 +202,9 @@ const MobilityPage = () => {
             </div>
 
             <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-                <div className="flex flex-col md:flex-row gap-6 h-[calc(100vh-140px)]">
+                <div className="flex flex-col md:flex-row gap-6">
                     {/* Left Panel: Inputs & Results */}
-                    <div className="w-full md:w-1/3 flex flex-col gap-6 overflow-y-auto pr-2 pb-20 custom-scrollbar">
+                    <div className="w-full md:w-1/3 flex flex-col gap-6">
                         {/* Input Card */}
                         <div className="bg-white/70 backdrop-blur-md p-6 rounded-xl border border-white/40 shadow-xl">
                             <h2 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2 drop-shadow-sm">
@@ -215,15 +248,31 @@ const MobilityPage = () => {
                                 <h3 className="font-bold flex items-center gap-2 text-lg drop-shadow-sm">
                                     <Leaf className="w-5 h-5 text-emerald-100" /> Green Impact
                                 </h3>
-                                <p className="mt-1 text-emerald-50 font-medium text-sm">
+                                <div className="mt-2 space-y-2 text-emerald-50 font-medium text-sm">
                                     {bestOption ? (
-                                        <>
-                                            Switching to <span className="font-bold text-white underline decoration-emerald-300 decoration-2">{bestOption.label}</span> could save approx <span className="font-bold text-white">{bestOption.saved}</span> per trip!
-                                        </>
+                                        <div className="flex flex-col gap-2">
+                                            <div className="space-y-1 bg-emerald-800/20 p-2 rounded-lg border border-emerald-400/20">
+                                                <p className="flex justify-between"><span>Car:</span> <span className="font-bold text-white">{comparisons.find(c => c.mode === 'car')?.co2}</span></p>
+                                                <p className="flex justify-between"><span>EV:</span> <span className="font-bold text-white">{comparisons.find(c => c.mode === 'ev')?.co2}</span></p>
+                                                <p className="flex justify-between"><span>Metro:</span> <span className="font-bold text-white">{comparisons.find(c => c.mode === 'metro')?.co2}</span></p>
+                                            </div>
+
+                                            <div className="mt-3 pt-3 border-t border-white/30 text-center">
+                                                <p className="text-sm leading-tight text-emerald-50 mb-1">
+                                                    The best option to travel to save environment is
+                                                </p>
+                                                <p className="font-extrabold text-white text-xl drop-shadow-md underline decoration-emerald-300 decoration-4 underline-offset-4">
+                                                    {bestOption.label}
+                                                </p>
+                                                <p className="text-xs mt-2 text-emerald-200">
+                                                    Saves <span className="font-bold text-white">{bestOption.saved}</span> CO₂
+                                                </p>
+                                            </div>
+                                        </div>
                                     ) : (
                                         "Calculate your route to see potential CO₂ savings!"
                                     )}
-                                </p>
+                                </div>
                             </div>
                         </div>
 
@@ -257,38 +306,81 @@ const MobilityPage = () => {
                         </div>
                     </div>
 
-                    {/* Right Panel: Map */}
-                    <div className="w-full md:w-2/3 bg-white/70 backdrop-blur-md rounded-xl border border-white/40 shadow-xl overflow-hidden relative h-[500px] md:h-auto z-0 ring-1 ring-black/5">
-                        <MapContainer
-                            center={[28.6139, 77.2090]}
-                            zoom={5}
-                            style={{ height: '100%', width: '100%' }}
-                            className="z-0"
-                        >
-                            <RecenterMap points={routePoints} />
-                            <TileLayer
-                                url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-                                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                            />
-                            <Marker position={routePoints[0]}>
-                                <Popup>Start: {start}</Popup>
-                            </Marker>
-                            <Marker position={routePoints[1]}>
-                                <Popup>End: {end}</Popup>
-                            </Marker>
-                            <Polyline positions={routePoints} color="#10b981" weight={5} opacity={0.8} />
-                        </MapContainer>
+                    {/* Right Panel: Map & AI Insights */}
+                    <div className="w-full md:w-2/3 flex flex-col gap-6">
+                        <div className="bg-white/70 backdrop-blur-md rounded-xl border border-white/40 shadow-xl overflow-hidden relative h-[500px] md:h-[calc(100vh-300px)] z-0 ring-1 ring-black/5">
+                            <MapContainer
+                                center={[28.6139, 77.2090]}
+                                zoom={5}
+                                style={{ height: '100%', width: '100%' }}
+                                className="z-0"
+                            >
+                                <RecenterMap points={routePoints} />
+                                <TileLayer
+                                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                                />
+                                <Marker position={routePoints[0]}>
+                                    <Popup>Start: {start}</Popup>
+                                </Marker>
+                                <Marker position={routePoints[1]}>
+                                    <Popup>End: {end}</Popup>
+                                </Marker>
+                                <Polyline positions={routePoints} color="#10b981" weight={5} opacity={0.8} />
+                            </MapContainer>
 
-                        {/* Live Navigation Overlay */}
-                        <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-md p-3 rounded-lg shadow-lg z-[1000] border border-white/40 max-w-xs ring-1 ring-black/5">
-                            <div className="flex items-start gap-3">
-                                <div className="bg-emerald-500 text-white p-2 rounded-full shadow-md animate-pulse">
-                                    <ArrowRight className="w-4 h-4" />
+                            {/* Live Navigation Overlay */}
+                            <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-md p-3 rounded-lg shadow-lg z-[1000] border border-white/40 max-w-xs ring-1 ring-black/5">
+                                <div className="flex items-start gap-3">
+                                    <div className="bg-emerald-500 text-white p-2 rounded-full shadow-md animate-pulse">
+                                        <ArrowRight className="w-4 h-4" />
+                                    </div>
+                                    <div>
+                                        <p className="font-bold text-slate-800 text-sm">Next: Turn Right</p>
+                                        <p className="text-xs text-slate-500">in 200m on Green Avenue</p>
+                                    </div>
                                 </div>
-                                <div>
-                                    <p className="font-bold text-slate-800 text-sm">Next: Turn Right</p>
-                                    <p className="text-xs text-slate-500">in 200m on Green Avenue</p>
-                                </div>
+                            </div>
+                        </div>
+
+                        {/* AI Suggestions Box (Separate Block) */}
+                        <div className="bg-white/80 backdrop-blur-md p-6 rounded-xl border border-white/40 shadow-xl transition-all">
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                    <Leaf className="w-5 h-5 text-emerald-600" /> AI Travel Insights
+                                </h3>
+                                <button
+                                    onClick={() => fetchSuggestions()}
+                                    disabled={aiLoading || !bestOption}
+                                    className="text-sm font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 disabled:opacity-50 bg-indigo-50 px-3 py-1.5 rounded-lg transition-colors border border-indigo-100"
+                                >
+                                    {aiLoading ? "Analyzing..." : "Refresh Insights"}
+                                </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                {suggestions.length > 0 ? (
+                                    suggestions.map((suggestion, index) => (
+                                        <div key={index} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+                                            <div className="flex items-center gap-2 mb-2">
+                                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${suggestion.type === 'Tip' ? 'bg-blue-100 text-blue-700' :
+                                                        suggestion.type === 'Fact' ? 'bg-purple-100 text-purple-700' :
+                                                            'bg-amber-100 text-amber-700'
+                                                    }`}>
+                                                    {suggestion.type}
+                                                </span>
+                                            </div>
+                                            <h4 className="font-bold text-slate-800 text-sm mb-1">{suggestion.title}</h4>
+                                            <p className="text-sm text-slate-600 leading-relaxed">{suggestion.description}</p>
+                                        </div>
+                                    ))
+                                ) : (
+                                    <div className="col-span-3 text-center py-8 bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
+                                        <p className="text-slate-500 text-sm">
+                                            {bestOption ? "AI is ready! Click Refresh to get personalized travel tips." : "Calculate a route above to unlock AI insights."}
+                                        </p>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>

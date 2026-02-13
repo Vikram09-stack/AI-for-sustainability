@@ -38,7 +38,7 @@ function AppContent() {
             <div className="flex items-center cursor-pointer" onClick={() => navigate('/')} role="button">
               <span className="text-2xl font-bold bg-gradient-to-r from-emerald-600 to-teal-500 bg-clip-text text-transparent flex items-center gap-2">
                 <Leaf className="w-6 h-6 text-emerald-500" />
-                EcoEnergyAI
+                UrbanMind
               </span>
             </div>
 

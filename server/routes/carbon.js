@@ -2,6 +2,7 @@ import express from 'express';
 import CarbonReport from '../models/CarbonReport.js';
 import { spawn } from 'child_process';
 import path from 'path';
+import { OpenAI } from 'openai';
 
 const router = express.Router();
 
@@ -62,6 +63,60 @@ router.post('/', async (req, res) => {
         res.status(201).json(savedReport);
     } catch (error) {
         res.status(400).json({ message: error.message });
+    }
+});
+
+// POST /api/carbon/suggestions - Get AI Suggestions
+router.post('/suggestions', async (req, res) => {
+    try {
+        const { breakdown, totalCarbonFootprint, sustainabilityScore } = req.body;
+
+        const client = new OpenAI({
+            apiKey: process.env.ASI_API_KEY,
+            baseURL: "https://inference.asicloud.cudos.org/v1"
+        });
+
+        const prompt = `
+        Based on this user's carbon footprint data:
+        - Total Annual Footprint: ${totalCarbonFootprint} kg CO2
+        - Sustainability Score: ${sustainabilityScore}/100
+        - Breakdown: Mobility (${breakdown.mobility} kg), Energy (${breakdown.energy} kg), Diet/Other (${breakdown.other} kg)
+
+        Provide 3 specific, actionable suggestions to reduce their carbon footprint.
+        Focus on the highest impacting areas.
+        Format the response as a JSON array of objects with 'title', 'description', and 'impact' (High/Medium/Low) keys.
+        Do not include markdown formatting or code blocks, just raw JSON.
+        `;
+
+        const response = await client.chat.completions.create({
+            model: "asi1-mini",
+            messages: [
+                { role: "user", content: prompt }
+            ]
+        });
+
+        const suggestionsText = response.choices[0].message.content;
+        // Attempt to parse JSON from AI response, handling potential string wrapping
+        let suggestions = [];
+        try {
+            // Remove markdown code blocks if present
+            const cleanJson = suggestionsText.replace(/```json/g, '').replace(/```/g, '').trim();
+            suggestions = JSON.parse(cleanJson);
+        } catch (e) {
+            console.error("Failed to parse AI suggestions:", e);
+            // Fallback if parsing fails
+            suggestions = [
+                { title: "Review Mobility", description: "Consider switching to public transport or EV.", impact: "High" },
+                { title: "Energy Audit", description: "Check your home insulation and appliances.", impact: "Medium" },
+                { title: "Dietary Changes", description: "Trying a plant-based diet can reduce emissions.", impact: "Low" }
+            ];
+        }
+
+        res.json(suggestions);
+
+    } catch (error) {
+        console.error("AI Suggestion Error:", error);
+        res.status(500).json({ message: "Failed to generate suggestions" });
     }
 });
 

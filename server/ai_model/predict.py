@@ -1,8 +1,25 @@
 import sys
 import json
 import random
+import pandas as pd
+import joblib
+import os
+try:
+    import xgboost as xgb
+except ImportError:
+    pass # Handle gracefully if possible, or fail later
+
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
+
+# Load model globally to avoid reloading on every request if wrapper persists (though here it's CLI based)
+MODEL_PATH = os.path.join(os.path.dirname(__file__), 'model (1).pkl')
+loaded_model = None
+try:
+    loaded_model = joblib.load(MODEL_PATH)
+except Exception as e:
+    # print(f"Error loading model: {e}", file=sys.stderr)
+    pass
 
 def calculate_mobility(data):
     """
@@ -55,8 +72,20 @@ def calculate_mobility(data):
     factor = factors.get(mode, factors['car'])
     
     co2 = round(distance * factor['co2'], 2)
-    cost = round(distance * factor['cost'], 2)
+    # Convert cost to INR (91 INR = 1 USD approx conversion for this context)
+    cost = round(distance * factor['cost'] * 91, 2)
     time_min = round((distance / factor['speed']) * 60)
+    
+    # Format time
+    if time_min >= 60:
+        hrs = time_min // 60
+        mins = time_min % 60
+        if mins > 0:
+            time_str = f"{hrs} hr {mins} min"
+        else:
+            time_str = f"{hrs} hr"
+    else:
+        time_str = f"{time_min} min"
     
     # Calculate savings vs car
     car_factor = factors['car']
@@ -66,8 +95,8 @@ def calculate_mobility(data):
     response = {
         "distance": f"{distance:.1f} km",
         "co2": f"{co2} kg",
-        "cost": f"${cost:.2f}",
-        "time": f"{time_min} min",
+        "cost": f"₹{cost:.2f}",
+        "time": time_str,
         "saved_vs_car": f"{saved_co2} kg" if saved_co2 > 0 else "0 kg"
     }
 
@@ -178,6 +207,92 @@ def optimize_energy(data):
         
     return suggestions
 
+def predict_energy_consumption(data):
+    """
+    Predict energy consumption using the pre-trained XGBoost model.
+    """
+    if loaded_model is None:
+        return {"error": "Model not loaded properly."}
+
+    try:
+        # Extract features
+        # Expected: Temperature, Humidity, SquareFootage, Occupancy, RenewableEnergy, 
+        #           hour, day, month, dayofweek, HVACUsage(code), LightingUsage(code), DayOfWeek(code), Holiday(code)
+        
+        timestamp_str = data.get('timestamp', '2022-01-01 12:00:00')
+        dt = pd.to_datetime(timestamp_str)
+        
+        temp = float(data.get('Temperature', 25.0))
+        humidity = float(data.get('Humidity', 50.0))
+        sq_footage = float(data.get('SquareFootage', 1500.0))
+        occupancy = int(data.get('Occupancy', 5))
+        renewable = float(data.get('RenewableEnergy', 0.0))
+        
+        hvac_status = data.get('HVACUsage', 'Off') # On/Off
+        lighting_status = data.get('LightingUsage', 'Off') # On/Off
+        holiday_status = data.get('Holiday', 'No') # Yes/No
+        
+        # Derived time features
+        hour = dt.hour
+        day = dt.day
+        month = dt.month
+        dayofweek_num = dt.dayofweek # 0=Monday, 6=Sunday
+        day_name = dt.day_name() # Monday, Tuesday...
+
+        # Categorical Encoding (Manual mapping based on alphabetical sort)
+        # HVAC: Off=0, On=1
+        hvac_code = 1 if hvac_status == 'On' else 0
+        
+        # Lighting: Off=0, On=1
+        lighting_code = 1 if lighting_status == 'On' else 0
+        
+        # Holiday: No=0, Yes=1
+        holiday_code = 1 if holiday_status == 'Yes' else 0
+        
+        # DayOfWeek: Friday=0, Monday=1, Saturday=2, Sunday=3, Thursday=4, Tuesday=5, Wednesday=6
+        day_map = {
+            'Friday': 0, 'Monday': 1, 'Saturday': 2, 'Sunday': 3, 
+            'Thursday': 4, 'Tuesday': 5, 'Wednesday': 6
+        }
+        day_code = day_map.get(day_name, 0)
+
+        # Create DataFrame for prediction (order matters if model used arrays, but pandas usually handles by name if XGBoost supports it)
+        # Based on training code snippet:
+        # X had: Temperature, Humidity, SquareFootage, Occupancy, HVACUsage, LightingUsage, RenewableEnergy, DayOfWeek, Holiday, hour, day, month, dayofweek
+        # Although the original dropped Timestamp and added derived.
+        # Let's match the probable column order from typical pandas usage or dictionary
+        
+        features = pd.DataFrame([{
+            'Temperature': temp,
+            'Humidity': humidity,
+            'SquareFootage': sq_footage,
+            'Occupancy': occupancy,
+            'HVACUsage': hvac_code,
+            'LightingUsage': lighting_code,
+            'RenewableEnergy': renewable,
+            'DayOfWeek': day_code,
+            'Holiday': holiday_code,
+            'hour': hour,
+            'day': day,
+            'month': month,
+            'dayofweek': dayofweek_num
+        }])
+        
+        # Ensure column order matches training if possible. 
+        # Provided snippet: categorical_cols encoded in place.
+        # Columns likely: Temperature, Humidity, SquareFootage, Occupancy, HVACUsage, LightingUsage, RenewableEnergy, DayOfWeek, Holiday, hour, day, month, dayofweek
+        
+        prediction = loaded_model.predict(features)[0]
+        
+        return {
+            "predicted_consumption": round(float(prediction), 2),
+            "units": "kWh",
+            "inputs": data
+        }
+
+    except Exception as e:
+        return {"error": f"Prediction error: {str(e)}"}
+
 if __name__ == "__main__":
     try:
         input_str = sys.stdin.read()
@@ -196,6 +311,8 @@ if __name__ == "__main__":
             result = simulate_energy(request)
         elif req_type == 'carbon_simulate':
             result = calculate_carbon(request)
+        elif req_type == 'energy_predict':
+            result = predict_energy_consumption(request)
         else:
             result = {"suggestions": optimize_energy(request)}
             

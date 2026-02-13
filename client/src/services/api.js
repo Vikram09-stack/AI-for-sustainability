@@ -58,6 +58,21 @@ export const simulateEnergy = async (params) => {
     }
 };
 
+export const predictEnergyConsumption = async (data) => {
+    try {
+        const response = await fetch(`${API_BASE_URL}/energy/predict`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        });
+        if (!response.ok) throw new Error('Failed to predict energy');
+        return await response.json();
+    } catch (error) {
+        console.error('Error predicting energy:', error);
+        return null;
+    }
+};
+
 // Mobility API
 export const getMobilityLogs = async () => {
     try {
@@ -138,6 +153,36 @@ export const logCarbonData = async (data) => {
         return await response.json();
     } catch (error) {
         console.error("Error logging carbon data:", error);
+        return null;
+    }
+};
+
+export const getCarbonSuggestions = async (data) => {
+    try {
+        const response = await fetch(`${API_BASE_URL}/carbon/suggestions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        });
+        if (!response.ok) throw new Error('Failed to get suggestions');
+        return await response.json();
+    } catch (error) {
+        console.error("Error getting carbon suggestions:", error);
+        return null;
+    }
+};
+
+export const getMobilitySuggestions = async (data) => {
+    try {
+        const response = await fetch(`${API_BASE_URL}/mobility/suggestions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        });
+        if (!response.ok) throw new Error('Failed to get mobility suggestions');
+        return await response.json();
+    } catch (error) {
+        console.error("Error getting mobility suggestions:", error);
         return null;
     }
 };

@@ -82,7 +82,7 @@ const LandingPage = ({ onGetStarted }) => {
                     <div className="w-8 h-8 bg-gradient-to-br from-emerald-400 to-green-300 rounded-lg flex items-center justify-center text-emerald-900 shadow-lg shadow-emerald-900/20">
                         <Leaf className="w-5 h-5" />
                     </div>
-                    EcoEnergyAI
+                    UrbanMind
                 </motion.div>
                 <motion.button
                     initial={{ opacity: 0, y: -20 }}

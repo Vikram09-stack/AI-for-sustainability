@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Zap, Sun, Wind, AlertTriangle, Building, Clock, Lightbulb, ArrowDown, Leaf } from 'lucide-react';
-import { simulateEnergy } from '../../services/api';
+import { simulateEnergy, predictEnergyConsumption } from '../../services/api';
 
 const EnergyPage = () => {
     const [buildingType, setBuildingType] = useState('office');
@@ -10,6 +10,21 @@ const EnergyPage = () => {
     const [lightingLevel, setLightingLevel] = useState(80); // %
     const [data, setData] = useState([]);
     const [metrics, setMetrics] = useState({ total_daily_kwh: 0, solar_potential: 0, peak_warning: false });
+
+    // AI Prediction State
+    const [predictInput, setPredictInput] = useState({
+        timestamp: new Date().toISOString().slice(0, 16),
+        Temperature: 25,
+        Humidity: 50,
+        SquareFootage: 1500,
+        Occupancy: 5,
+        RenewableEnergy: 0,
+        HVACUsage: 'Off',
+        LightingUsage: 'Off',
+        Holiday: 'No'
+    });
+    const [prediction, setPrediction] = useState(null);
+    const [predictLoading, setPredictLoading] = useState(false);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -32,6 +47,20 @@ const EnergyPage = () => {
         const timeoutId = setTimeout(fetchData, 300); // Debounce
         return () => clearTimeout(timeoutId);
     }, [buildingType, operatingHours, lightingLevel]);
+
+    const handlePredict = async () => {
+        setPredictLoading(true);
+        const result = await predictEnergyConsumption(predictInput);
+        if (result && result.predicted_consumption) {
+            setPrediction(result.predicted_consumption);
+        }
+        setPredictLoading(false);
+    };
+
+    const handleInputChange = (e) => {
+        const { name, value } = e.target;
+        setPredictInput(prev => ({ ...prev, [name]: value }));
+    };
 
     const savings = metrics.total_daily_kwh ? Math.round((metrics.solar_potential / metrics.total_daily_kwh) * 100) : 0;
 
@@ -149,17 +178,70 @@ const EnergyPage = () => {
                         </div>
 
                         {/* Peak Waste Alert Box */}
-                        {metrics.peak_warning && (
-                            <div className="bg-red-50/80 backdrop-blur-md border border-red-100 p-4 rounded-xl flex items-start gap-4 animate-pulse shadow-md">
-                                <div className="p-2 bg-red-100 rounded-full text-red-600 shadow-sm">
-                                    <AlertTriangle className="w-6 h-6" />
-                                </div>
-                                <div>
-                                    <h4 className="font-bold text-red-800 text-lg">High Usage Alert: Peak Hours</h4>
-                                    <p className="text-red-700 text-sm mt-1">Usage spikes detected during peak costing hours (9 AM - 6 PM). Consider shifting heavy loads or dimming lights.</p>
-                                </div>
-                            </div>
                         )}
+
+                        {/* AI Prediction Card */}
+                        <div className="bg-white/70 backdrop-blur-md p-6 rounded-xl border border-white/40 shadow-xl">
+                            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                <Zap className="w-5 h-5 text-purple-600" /> AI Energy Predictor
+                            </h3>
+
+                            <div className="space-y-3">
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="text-xs text-slate-500 font-medium">Temp (°C)</label>
+                                        <input type="number" name="Temperature" value={predictInput.Temperature} onChange={handleInputChange} className="w-full px-2 py-1.5 rounded text-sm border border-slate-200" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-slate-500 font-medium">Humidity (%)</label>
+                                        <input type="number" name="Humidity" value={predictInput.Humidity} onChange={handleInputChange} className="w-full px-2 py-1.5 rounded text-sm border border-slate-200" />
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="text-xs text-slate-500 font-medium">Sq Footage</label>
+                                        <input type="number" name="SquareFootage" value={predictInput.SquareFootage} onChange={handleInputChange} className="w-full px-2 py-1.5 rounded text-sm border border-slate-200" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-slate-500 font-medium">Occupancy</label>
+                                        <input type="number" name="Occupancy" value={predictInput.Occupancy} onChange={handleInputChange} className="w-full px-2 py-1.5 rounded text-sm border border-slate-200" />
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-3">
+                                    <select name="HVACUsage" value={predictInput.HVACUsage} onChange={handleInputChange} className="px-2 py-1.5 rounded text-xs border border-slate-200">
+                                        <option value="Off">HVAC Off</option>
+                                        <option value="On">HVAC On</option>
+                                    </select>
+                                    <select name="LightingUsage" value={predictInput.LightingUsage} onChange={handleInputChange} className="px-2 py-1.5 rounded text-xs border border-slate-200">
+                                        <option value="Off">Lights Off</option>
+                                        <option value="On">Lights On</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="text-xs text-slate-500 font-medium">Timestamp</label>
+                                    <input type="datetime-local" name="timestamp" value={predictInput.timestamp} onChange={handleInputChange} className="w-full px-2 py-1.5 rounded text-sm border border-slate-200" />
+                                </div>
+
+                                <button
+                                    onClick={handlePredict}
+                                    disabled={predictLoading}
+                                    className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 rounded-lg transition-colors text-sm"
+                                >
+                                    {predictLoading ? 'Calculating...' : 'Predict Consumption'}
+                                </button>
+
+                                {prediction !== null && (
+                                    <div className="mt-3 p-3 bg-purple-50 rounded-lg border border-purple-100 text-center animate-fade-in">
+                                        <p className="text-xs text-purple-600 uppercase font-bold tracking-wider mb-1">Predicted Usage</p>
+                                        <p className="text-2xl font-bold text-slate-800">{prediction} <span className="text-sm font-normal text-slate-500">kWh</span></p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
                     </div>
 
                     {/* Controls Column (1/3 width) */}
